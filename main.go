@@ -8,9 +8,7 @@ import (
 	"os"
 	"strconv"
 	"time"
-
 	"github.com/go-chi/chi/v5"
-
 	//"soc/api"
 	"github.com/google/uuid"
 	//"container/list"
@@ -22,6 +20,50 @@ import (
 func main() {
 	fmt.Println("Starting service on port 3000")
 	createFolders() //if not exists
+	//startNotifyWorker() // start notifing file create
+	////////////////////
+	watcher, err := fsnotify.NewWatcher()
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer watcher.Close()
+
+	go func() {
+        for {
+            select {
+            case event, ok := <-watcher.Events:
+                if !ok {
+                    return
+                }
+                //log.Println("event:", event)
+                if event.Has(fsnotify.Create) {
+					fmt.Printf("New notification: %s\n", event.Name)
+					//fmt.Printf("Task %s in progress\n", item.TaskId)
+					//////////////////////
+					// start workers?
+					//////////////////////
+                }
+            case err, ok := <-watcher.Errors:
+                if !ok {
+                    return
+                }
+                log.Println("error:", err)
+            }
+        }
+    }()
+
+	err = watcher.Add("./tasks/worker")
+	if err != nil {
+        log.Fatal(err)
+    }
+	err = watcher.Add("./tasks/done")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+	// Block main goroutine forever.
+    // <-make(chan struct{})
+	//////////////////////
 	startWS() //start webserver
 
 }
@@ -36,6 +78,7 @@ type hubRequest struct { //struct for post data
 
 func startWS() { //start webserver and wait for post data in "/" route
 	router := chi.NewRouter()
+
 	router.Post("/", func(w http.ResponseWriter, r *http.Request) {
 		var item hubRequest
 		err := json.NewDecoder(r.Body).Decode(&item)
@@ -44,13 +87,9 @@ func startWS() { //start webserver and wait for post data in "/" route
 			w.Write([]byte(err.Error()))
 			return
 		}
-		
-		fmt.Println("beforeNotify")
-		startNotifyWorker2()
-		fmt.Println("afterNotify")
 
 		item.UUID = uuid.New()
-		createTask(item)
+		createTask(item) // make go routine from this func?
 		
 		jsonItem, err := json.Marshal(item.TaskId)
 		if err != nil {
@@ -59,8 +98,9 @@ func startWS() { //start webserver and wait for post data in "/" route
 			return
 		}
 		w.Write(jsonItem)
-		fmt.Printf("Task %s in progress", item.ItemId)
+		fmt.Printf("Task %s in progress\n", item.TaskId)
 	})
+
 	err := http.ListenAndServe(":3000", router)
 	if err != nil {
 		log.Println(err)
@@ -68,8 +108,6 @@ func startWS() { //start webserver and wait for post data in "/" route
 }
 
 func createFolders() {
-	//var sFolders []string = ["api", "worker", "done"]
-	//for idx, val := range sFolders {
 	_, err := os.Stat("tasks")
 	if os.IsNotExist(err) {
 		errDir := os.MkdirAll("tasks/api", 0755)
@@ -86,40 +124,32 @@ func createFolders() {
 		}
 		fmt.Println("Folders created")
 	}
-	//}
 }
 
 func createTask(item hubRequest) {
 	f, err := os.Create("tasks/worker/"+item.TaskId + "." + item.UUID.String() + "." + strconv.Itoa(int(time.Now().Unix())) + ".json")
+	
 	if err != nil {
 		log.Fatal(err)
 	}
-	//defer f.Close()
-	////////////////
+	
 	b, err := json.Marshal(item)
 	if err != nil {
 		fmt.Println(err)
 		return
-		//log.Fatal(err)
 	}
+
 	f.Write(b)
-	//f, err := os.OpenFile(filename, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0660)
-	//os.O_RDWR|os.O_CREATE, 0755
-
-	//if err != nil {
-	//	fmt.Println(err)
-	//	os.Exit(-1)
-	//}
-	//defer f.Close()
-
-	//fmt.Fprintf(f, "%s\n", message)
-	///////////////
 	f.Close()
-
-	//fmt.Println(string(b))
 }
 
-func startNotifyWorker(){
+//func startNotifyWorker() {
+	
+//}
+
+/*
+
+func startNotifyWorker2(){
 	watcher, err := fsnotify.NewWatcher() // Initialize an empty watcher
     if err != nil {
         log.Fatal(err)
@@ -131,7 +161,8 @@ func startNotifyWorker(){
         for {
             select {
             case event, ok := <-watcher.Events: // Normal event processing logic
-                if! ok {return
+                if ! ok {
+					return
                 }
                 log.Println("event:", event)
                 if event.Op&fsnotify.Create == fsnotify.Create {
@@ -142,57 +173,24 @@ func startNotifyWorker(){
 					/////////////////
                 }
             case err, ok := <-watcher.Errors: // Processing logic when an error occurs
-                if! ok {return
+                if ! ok {
+					return
                 }
                 log.Println("error:", err)
             }
         }
     }()
-
-    err = watcher.Add("/tasks") // Enable watcher to monitor/TMP /foo
+	
+	fmt.Println("before watcher.Add")
+    err = watcher.Add("./tasks/worker") // Enable watcher to monitor/TMP /foo
     if err != nil {
         log.Fatal(err)
     }
+	fmt.Println("after watcher.Add")
     <-done // Make the main coroutine not exit
 }
 
-func startNotifyWorker2() {
-	watcher, err := fsnotify.NewWatcher()
-    if err != nil {
-        log.Fatal(err)
-    }
-    defer watcher.Close()
-
-    // Start listening for events.
-    go func() {
-        for {
-            select {
-            case event, ok := <-watcher.Events:
-                if !ok {
-                    return
-                }
-                log.Println("event:", event)
-                if event.Has(fsnotify.Create) {
-                    log.Println("modified file:", event.Name)
-                }
-            case err, ok := <-watcher.Errors:
-                if !ok {
-                    return
-                }
-                log.Println("error:", err)
-            }
-        }
-    }()
-
-    // Add a path.
-    err = watcher.Add("/tasks/worker")
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // Block main goroutine forever.
-    <-make(chan struct{})
-}
+*/
 
 /*2
 	//url := "https://api.serpdog.io/search?api_key=66a3cfe3532d58cbb444cfb1&q=go+lang+tutorial&gl=us"
